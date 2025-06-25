@@ -2,105 +2,106 @@
 - name: Install Docker and Docker Compose
   hosts: all
   become: true
-  vars:
-    docker_compose_path: /usr/local/bin/docker-compose
-
   tasks:
+
     - name: Gather OS info
       ansible.builtin.setup:
-        gather_subset:
-          - '!all'
-          - 'min'
 
-    - name: Install dependencies for CentOS
+    - name: Install required packages (Ubuntu)
+      when: ansible_facts['os_family'] == "Debian"
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Add Docker GPG key (Ubuntu)
+      when: ansible_facts['os_family'] == "Debian"
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker APT repository (Ubuntu)
+      when: ansible_facts['os_family'] == "Debian"
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_facts['lsb']['codename'] }} stable"
+        state: present
+        filename: docker
+
+    - name: Install Docker (Ubuntu)
+      when: ansible_facts['os_family'] == "Debian"
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Install required packages (CentOS)
       when: ansible_facts['os_family'] == "RedHat"
-      ansible.builtin.yum:
+      yum:
         name:
           - yum-utils
           - device-mapper-persistent-data
           - lvm2
         state: present
 
-    - name: Add Docker repo for CentOS
+    - name: Add Docker YUM repository (CentOS)
       when: ansible_facts['os_family'] == "RedHat"
-      ansible.builtin.command: >
-        yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-      args:
-        creates: /etc/yum.repos.d/docker-ce.repo
-
-    - name: Install Docker for CentOS
-      when: ansible_facts['os_family'] == "RedHat"
-      ansible.builtin.yum:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-        state: present
-
-    - name: Install dependencies for Ubuntu
-      when: ansible_facts['os_family'] == "Debian"
-      ansible.builtin.apt:
-        name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - software-properties-common
-        update_cache: yes
-        state: present
-
-    - name: Add Docker GPG key for Ubuntu
-      when: ansible_facts['os_family'] == "Debian"
-      ansible.builtin.get_url:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        dest: /usr/share/keyrings/docker-archive-keyring.gpg
-
-    - name: Add Docker repo for Ubuntu
-      when: ansible_facts['os_family'] == "Debian"
-      ansible.builtin.apt_repository:
-        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_facts['lsb']['codename'] }} stable"
-        filename: docker
-        state: present
-
-    - name: Install Docker for Ubuntu
-      when: ansible_facts['os_family'] == "Debian"
-      ansible.builtin.apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-        update_cache: yes
-        state: present
-
-    - name: Enable and start Docker service
-      ansible.builtin.service:
-        name: docker
+      yum_repository:
+        name: docker-ce
+        description: Docker CE Stable - $basearch
+        baseurl: https://download.docker.com/linux/centos/7/$basearch/stable
+        gpgcheck: yes
+        gpgkey: https://download.docker.com/linux/centos/gpg
         enabled: yes
-        state: started
 
-    - name: Add current user to docker group
-      ansible.builtin.user:
-        name: "{{ ansible_user }}"
+    - name: Install Docker (CentOS)
+      when: ansible_facts['os_family'] == "RedHat"
+      yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Start and enable Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-{{ ansible_system }}-{{ ansible_architecture }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user | default('ubuntu') }}"
         groups: docker
         append: yes
 
-    - name: Install Docker Compose
-      ansible.builtin.get_url:
-        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-{{ ansible_system }}-{{ ansible_architecture }}"
-        dest: "{{ docker_compose_path }}"
-        mode: '0755'
+    - name: Check Docker version
+      command: docker --version
+      register: docker_version
+      changed_when: false
 
-    - name: Verify Docker version
-      ansible.builtin.command: docker --version
-      register: docker_version_output
+    - name: Check Docker Compose version
+      command: docker-compose --version
+      register: compose_version
+      changed_when: false
 
-    - name: Show Docker version
-      ansible.builtin.debug:
-        var: docker_version_output.stdout
+    - name: Print Docker version
+      debug:
+        msg: "{{ docker_version.stdout }}"
 
-    - name: Verify Docker Compose version
-      ansible.builtin.command: docker-compose --version
-      register: docker_compose_version_output
-
-    - name: Show Docker Compose version
-      ansible.builtin.debug:
-        var: docker_compose_version_output.stdout
+    - name: Print Docker Compose version
+      debug:
+        msg: "{{ compose_version.stdout }}"
